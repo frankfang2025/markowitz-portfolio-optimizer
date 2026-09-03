@@ -91,26 +91,51 @@ const PROXIES=[u=>'https://proxy.cors.sh/'+u, u=>'https://api.allorigins.win/raw
 
 async function fetchFund(code, field){
   const src=`https://fund.eastmoney.com/pingzhongdata/${code}.js`;
-  let lastErr='';
+  const errs=[];
   for(const p of PROXIES){
     try{
       const r=await fetch(p(src),{signal:AbortSignal.timeout(45000)});
-      if(!r.ok){lastErr='HTTP '+r.status;continue;}
+      if(!r.ok){ errs.push('HTTP '+r.status); continue; }
       const t=await r.text();
+      if(!t || t.length<200){ errs.push('返回内容为空'); continue; }
       const nameM=t.match(/var\s+fS_name\s*=\s*"([^"]*)"/);
+      const name=nameM?nameM[1]:'';
       let points=null, note='';
       if(field==='LJJZ'){
         const m=t.match(/Data_ACWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
-        if(m){points=JSON.parse(m[1]);note='累计净值';}
+        if(m){ points=JSON.parse(m[1]); note='累计净值'; }
       }else{
         const m=t.match(/Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
-        if(m){points=JSON.parse(m[1]).map(o=>[o.x,o.y]);note='单位净值';}
+        if(m){ points=JSON.parse(m[1]).map(o=>[o.x,o.y]); note='单位净值'; }
       }
-      if(!points||!points.length){lastErr='净值序列为空';continue;}
-      return {code, name:nameM?nameM[1]:'', points, field_note:note};
-    }catch(e){ lastErr=String(e).slice(0,80); }
+      // 文件确实拿到了，但里面没有净值序列 —— 这是基金类型问题，换代理也没用。
+      if(!points||!points.length){
+        const e=new Error(`${code}${name?' '+name:''}：天天基金没有提供该基金的`
+          +`${field==='LJJZ'?'累计':'单位'}净值序列。货币基金只有「万份收益」，`
+          +`不适用马科维茨优化；请改用股票 / 债券 / 指数型基金或 ETF。`);
+        e.fatal=true; throw e;
+      }
+      return {code, name, points, field_note:note};
+    }catch(e){
+      if(e.fatal) throw e;
+      errs.push(String(e.message||e).slice(0,60));
+    }
   }
-  throw new Error(`${code} 数据获取失败：${lastErr}`);
+  throw new Error(`无法获取 ${code} 的净值数据。常见原因：代码不存在或拼写有误；`
+    +`该基金是货币基金（无净值序列）；或公共 CORS 代理暂时不可用，稍后重试即可。`
+    +`（诊断：${errs.join('；')}）`);
+}
+
+// 一次性把所有代码都试完，把失败的一起报出来，避免用户改一个错一个。
+async function fetchAll(codes, field){
+  const ok=[], bad=[];
+  for(const c of codes){
+    log(`下载 ${c} 净值…`);
+    try{ ok.push(await fetchFund(c, field)); }
+    catch(e){ bad.push(String(e.message||e)); log(`  ✗ ${c} 失败`); }
+  }
+  if(bad.length) throw new Error(bad.join('\n\n'));
+  return ok;
 }
 
 let pyodide, py;
@@ -153,8 +178,7 @@ runBtn.onclick=async()=>{
     const codes=v.get(0).toJs(), start=v.get(4), end=v.get(5);
     log(`区间 ${start} → ${end}，共 ${codes.length} 只标的。`);
 
-    const payload=[];
-    for(const c of codes){ log(`下载 ${c} 净值…`); payload.push(await fetchFund(c, field)); }
+    const payload=await fetchAll(codes, field);
     log('对齐交易日…');
     const f=py.build_frame(JSON.stringify(payload), start, end);
     log('估计年化收益与协方差、求解组合、回测、生成前沿…');
@@ -182,7 +206,9 @@ runBtn.onclick=async()=>{
     out.className=''; log('完成。');
   }catch(e){
     const msg=(e&&e.message)?e.message:String(e);
-    errBox.className='card err'; errBox.textContent='出错：'+msg.split('\n').slice(-6).join('\n');
+    errBox.className='card err';
+    errBox.textContent='出错：\n'+msg;
+    errBox.style.whiteSpace='pre-wrap';
     log('失败。');
   }finally{ runBtn.disabled=false; }
 };
