@@ -166,6 +166,37 @@ function tbl(el,head,rows){
 }
 const pct=x=>(x*100).toFixed(2)+'%';
 
+// 与 markowitz_etf_optimizer_v2.write_html_report 的表格约定保持一致：
+// 收益/波动/无风险利率用 format_pct（两位百分比），夏普用 format_num（两位小数），
+// 年份和交易日是整数，缺失值显示「—」。
+const PCT_COLS=new Set(['period_return','annualized_mean_return','annual_std','period_risk_free']);
+const INT_COLS=new Set(['year','trading_days']);
+const NUM_COLS=new Set(['sharpe_ratio']);
+function fmtCell(key,x){
+  if(x===null||x===undefined) return '—';
+  if(typeof x==='boolean') return x?'是':'否';
+  if(typeof x==='number'){
+    if(!isFinite(x)) return '—';
+    if(INT_COLS.has(key)) return String(Math.round(x));
+    if(PCT_COLS.has(key)) return pct(x);
+    if(NUM_COLS.has(key)) return x.toFixed(2);
+  }
+  return String(x);
+}
+function annualTable(el, rows){
+  const head=Object.keys(rows[0]);
+  el.innerHTML='<thead><tr>'+head.map(h=>`<th>${h}</th>`).join('')+'</tr></thead><tbody>'+
+    rows.map(r=>'<tr>'+head.map(k=>{
+      const txt=fmtCell(k,r[k]);
+      // 期间收益按正负着色，和 HTML 报告里的处理一致
+      if(k==='period_return'&&typeof r[k]==='number'&&isFinite(r[k])){
+        const c=r[k]>=0?'#4ade80':'#f87171';
+        return `<td style="color:${c};font-weight:600">${txt}</td>`;
+      }
+      return `<td>${txt}</td>`;
+    }).join('')+'</tr>').join('')+'</tbody>';
+}
+
 runBtn.onclick=async()=>{
   const errBox=document.getElementById('errBox'), out=document.getElementById('out');
   errBox.className='hide'; out.className='hide'; runBtn.disabled=true;
@@ -198,10 +229,10 @@ runBtn.onclick=async()=>{
     document.getElementById('svg1').innerHTML=res.portfolio_svg;
     document.getElementById('svg2').innerHTML=res.frontier_svg||'<div class="hint">本次未生成有效前沿。</div>';
     const am=res.annual_metrics||[];
-    if(am.length) tbl(document.getElementById('am'),Object.keys(am[0]),
-      am.map(r=>Object.values(r).map(x=>typeof x==='number'?x.toFixed(4):x)));
-    tbl(document.getElementById('corr'),['']. concat(res.correlation.labels),
-      res.correlation.matrix.map((row,i)=>[res.correlation.labels[i]].concat(row)));
+    if(am.length) annualTable(document.getElementById('am'), am);
+    tbl(document.getElementById('corr'),[''].concat(res.correlation.labels),
+      res.correlation.matrix.map((row,i)=>[res.correlation.labels[i]]
+        .concat(row.map(x=>x===null||x===undefined||!isFinite(x)?'—':Number(x).toFixed(3)))));
     document.getElementById('dl').href=URL.createObjectURL(new Blob([res.report_html],{type:'text/html'}));
     out.className=''; log('完成。');
   }catch(e){

@@ -10,12 +10,28 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 
 import pandas as pd
 
 import markowitz_etf_optimizer_v2 as core
 
 MAX_CODES = 12
+
+
+def _json_safe(value):
+    """NaN / inf 不是合法 JSON：json.dumps 会写出裸 NaN，浏览器 JSON.parse 直接抛错。
+
+    build_portfolio_annual_metrics 在样本不足时会返回 float("nan")（例如不足一年的
+    区间算不出夏普），所以这里统一转成 null，由前端显示为「—」。
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def validate_inputs(codes_raw, target_return_raw, risk_free_raw, years_raw):
@@ -161,7 +177,7 @@ def run(prices, downloads, display_labels, target_return, risk_free_rate, allow_
     )
 
     weights = result.weights.rename(index=display_labels)
-    return json.dumps({
+    return json.dumps(_json_safe({
         "warnings": warnings,
         "target_return": float(target_return),
         "annual_return": float(result.annual_return),
@@ -184,4 +200,4 @@ def run(prices, downloads, display_labels, target_return, risk_free_rate, allow_
                 index=display_labels, columns=display_labels).round(3).values.tolist(),
         },
         "report_html": open(report_path, encoding="utf-8").read(),
-    })
+    }), allow_nan=False)
