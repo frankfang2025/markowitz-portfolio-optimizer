@@ -1,0 +1,8 @@
+# Pinned to the versions the optimizer was verified against locally, so the
+# deployed results match the CLI run exactly.
+Flask==3.1.3
+pandas==3.0.2
+numpy==2.4.4
+requests==2.33.1
+beautifulsoup4==4.14.3
+gunicorn==23.0.0

@@ -1,0 +1,15 @@
+# Credentials — never commit. .wglh_cookie holds a live wglh.com login session.
+.wglh_cookie
+.wglh_cookie.*
+.env
+.env.*
+
+# Generated reports
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+myenv/
+.DS_Store

@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: markowitz-optimizer
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
