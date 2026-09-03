@@ -50,7 +50,11 @@ def build_frame(payload_json, start, end):
         points = item["points"]
         if not points:
             raise core.DataSourceError(f"{code.label}: 数据源没有返回净值序列。")
-        index = pd.to_datetime([p[0] for p in points], unit="ms")
+        # pingzhongdata 的时间戳是北京时间当日零点，用 epoch 毫秒表示，
+        # 直接按 UTC 解析会落在前一天 16:00，导致整条序列早一天。
+        # 中国自 1991 年起不用夏令时，固定 +8 小时即可，且不依赖 tzdata。
+        index = (pd.to_datetime([p[0] for p in points], unit="ms")
+                 + pd.Timedelta(hours=8)).normalize()
         series = pd.Series([float(p[1]) for p in points], index=index).sort_index()
         series = series[~series.index.duplicated(keep="last")]
         series = series.loc[str(start):str(end)]
