@@ -7,6 +7,30 @@
 中同一套已验证的函数（含 `validate_portfolio_result` 双重校验），因此网页结果与命令行
 版本完全一致。
 
+## 在线运行（无需安装）
+
+**https://frankfang2025.github.io/markowitz-portfolio-optimizer/**
+
+打开即用。GitHub Pages 只能托管静态文件、跑不了 Flask，所以这个版本用 Pyodide 把真实的
+CPython + numpy + pandas 加载到访问者的浏览器里运行。**只替换了数据下载这一层**，
+`estimate_annual_return_and_cov`、`solve_target_portfolio_with_policy`、
+`validate_portfolio_result`、回测、有效前沿、SVG 出图和 HTML 报告全部直接调用
+`markowitz_etf_optimizer_v2.py` 中的原函数，未做任何重写。
+
+首次打开需下载约 25MB 的 Python 运行时（之后浏览器缓存），一次优化约 1-3 分钟。
+
+### 为什么换数据源
+
+天天基金的 `api.fund.eastmoney.com/f10/lsjz` 接口有 Referer 校验，而浏览器脚本被禁止
+设置 `Referer`，实测直接请求会返回 `ErrCode:-999`。因此浏览器版改用同站的静态净值文件
+`fund.eastmoney.com/pingzhongdata/<code>.js`（无 Referer 校验），经公共 CORS 代理获取。
+
+两个数据源已验证等价：510300 近一年，按北京时间对齐后 **242/243 个交易日重合，
+最大绝对差 0.0000000000**。
+
+注意该文件的时间戳是北京时间零点的 epoch 毫秒，按 UTC 解析会整体早一天（实测只有
+190/243 天对得上，最大差 0.0615），代码里固定 +8 小时后再 normalize。
+
 ## 本地运行
 
 ```bash
