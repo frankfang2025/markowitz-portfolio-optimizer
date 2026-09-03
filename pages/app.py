@@ -45,17 +45,39 @@ def build_frame(payload_json, start, end):
     payload = json.loads(payload_json)
     downloads = []
     display_labels = {}
+    data_notes = []
     for item in payload:
         code = core.normalize_fund_code(item["code"])
         points = item["points"]
         if not points:
             raise core.DataSourceError(f"{code.label}: 数据源没有返回净值序列。")
+
+        # 天天基金对停牌/未披露的交易日会给出 null 净值，直接 float() 会抛
+        # TypeError。这里连同对应的时间戳一起丢弃，保持索引与数值一一对应；
+        # 下游本来就用 join="inner" + dropna 对齐多资产，丢弃与既有行为一致。
+        pairs = []
+        dropped = 0
+        for point in points:
+            value = point[1] if len(point) > 1 else None
+            if value is None or value == "":
+                dropped += 1
+                continue
+            try:
+                pairs.append((point[0], float(value)))
+            except (TypeError, ValueError):
+                dropped += 1
+        if not pairs:
+            raise core.DataSourceError(
+                f"{code.label}: 数据源返回的净值序列全部为空值，无法使用。")
+        if dropped:
+            data_notes.append(f"{code.label}: 已跳过 {dropped} 个净值为空的交易日。")
+
         # pingzhongdata 的时间戳是北京时间当日零点，用 epoch 毫秒表示，
         # 直接按 UTC 解析会落在前一天 16:00，导致整条序列早一天。
         # 中国自 1991 年起不用夏令时，固定 +8 小时即可，且不依赖 tzdata。
-        index = (pd.to_datetime([p[0] for p in points], unit="ms")
+        index = (pd.to_datetime([pair[0] for pair in pairs], unit="ms")
                  + pd.Timedelta(hours=8)).normalize()
-        series = pd.Series([float(p[1]) for p in points], index=index).sort_index()
+        series = pd.Series([pair[1] for pair in pairs], index=index).sort_index()
         series = series[~series.index.duplicated(keep="last")]
         series = series.loc[str(start):str(end)]
         if len(series) < 5:
@@ -75,14 +97,15 @@ def build_frame(payload_json, start, end):
     ).sort_index().dropna(how="any")
     if prices.empty or len(prices) < 4:
         raise core.DataSourceError("多资产共同日期样本太少，无法估计组合收益和协方差。")
-    return prices, downloads, display_labels
+    return prices, downloads, display_labels, data_notes
 
 
-def run(prices, downloads, display_labels, target_return, risk_free_rate, allow_short):
+def run(prices, downloads, display_labels, target_return, risk_free_rate, allow_short,
+        data_notes=None, report_path="/report.html"):
     """与 markowitz_web.py 中的任务流程逐行对应，调用的是同一批 core 函数。"""
     from dataclasses import replace
 
-    warnings = []
+    warnings = list(data_notes or [])
     trading_days = core.DEFAULT_TRADING_DAYS
 
     annual_mu, annual_cov, returns = core.estimate_annual_return_and_cov(prices, trading_days)
@@ -125,7 +148,7 @@ def run(prices, downloads, display_labels, target_return, risk_free_rate, allow_
         replace(d, code=replace(d.code, label=display_labels[d.code.label])) for d in downloads
     ]
     core.write_html_report(
-        output_path="/report.html",
+        output_path=report_path,
         codes_label=" ".join(display_labels[d.code.label] for d in downloads),
         prices=prices, downloads=report_downloads, warnings=warnings,
         asset_stats=asset_stats.rename(index=display_labels),
@@ -160,5 +183,5 @@ def run(prices, downloads, display_labels, target_return, risk_free_rate, allow_
             "matrix": returns.corr().rename(
                 index=display_labels, columns=display_labels).round(3).values.tolist(),
         },
-        "report_html": open("/report.html", encoding="utf-8").read(),
+        "report_html": open(report_path, encoding="utf-8").read(),
     })

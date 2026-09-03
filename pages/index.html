@@ -184,7 +184,7 @@ runBtn.onclick=async()=>{
     log('估计年化收益与协方差、求解组合、回测、生成前沿…');
     await new Promise(r=>setTimeout(r,30));
     const res=JSON.parse(py.run(f.get(0), f.get(1), f.get(2), v.get(1), v.get(2),
-      document.getElementById('short').value==='1'));
+      document.getElementById('short').value==='1', f.get(3)));
 
     document.getElementById('warns').innerHTML=(res.warnings||[]).map(w=>`<div class="warn">${w}</div>`).join('');
     document.getElementById('metrics').innerHTML=[
