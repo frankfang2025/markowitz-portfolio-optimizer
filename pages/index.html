@@ -119,7 +119,9 @@ let pyodide, py;
     setLog('正在加载 Python 运行时…');
     pyodide=await loadPyodide({indexURL:'https://cdn.jsdelivr.net/pyodide/v0.28.3/full/'});
     log('正在加载 numpy / pandas…');
-    await pyodide.loadPackage(['numpy','pandas']);
+    // requests 和 bs4 在浏览器路径上永远不会被调用（下载层已换成 fetch），
+    // 但内核在模块顶层 import 了它们，所以必须让 import 能成功。
+    await pyodide.loadPackage(['numpy','pandas','requests','beautifulsoup4']);
     log('正在载入优化器内核…');
     for(const f of ['markowitz_etf_optimizer_v2.py','app.py']){
       const r=await fetch(f+'?v='+Date.now());
