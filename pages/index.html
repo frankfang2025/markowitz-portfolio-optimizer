@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>马科维茨 ETF/基金组合优化器</title>
+<style>
+  :root{--bg:#0f172a;--panel:#1e293b;--panel2:#172033;--line:#334155;--fg:#e2e8f0;--mut:#94a3b8;--acc:#3b82f6;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px}
+  h1{font-size:24px;margin:0 0 4px}
+  .sub{color:var(--mut);font-size:14px;margin-bottom:24px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:18px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
+  label{display:block;font-size:13px;color:var(--mut);margin-bottom:6px}
+  input,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit}
+  input:focus,select:focus{outline:none;border-color:var(--acc)}
+  .hint{font-size:12px;color:var(--mut);margin-top:8px}
+  button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:12px 22px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  #log{background:#0b1120;border:1px solid var(--line);border-radius:8px;padding:12px 14px;font:12.5px/1.75 ui-monospace,SFMono-Regular,Menlo,monospace;max-height:220px;overflow:auto;white-space:pre-wrap;color:var(--mut)}
+  .m{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+  .mc{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .mc .k{font-size:11px;letter-spacing:.06em;color:var(--mut);text-transform:uppercase}
+  .mc .v{font-size:22px;font-weight:700;margin-top:4px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--mut);font-weight:600;font-size:12px}
+  .scroll{overflow-x:auto}
+  svg{max-width:100%;height:auto;background:#fff;border-radius:8px}
+  .warn{background:rgba(245,158,11,.12);border:1px solid var(--warn);color:#fde68a;border-radius:8px;padding:10px 13px;font-size:13.5px;margin-bottom:10px}
+  .err{background:rgba(239,68,68,.12);border:1px solid var(--err);color:#fecaca;border-radius:8px;padding:12px 14px;font-size:14px}
+  .hide{display:none}
+  h2{font-size:17px;margin:0 0 14px}
+  a.dl{display:inline-block;background:var(--panel2);border:1px solid var(--line);color:var(--fg);text-decoration:none;border-radius:8px;padding:9px 16px;font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>马科维茨 ETF/基金组合优化器</h1>
+  <div class="sub">在浏览器里运行真实的 Python 计算内核（Pyodide + numpy + pandas），无需服务器。</div>
+
+  <div class="card">
+    <div class="grid">
+      <div style="grid-column:1/-1">
+        <label>基金 / ETF 代码（空格分隔，最多 12 个）</label>
+        <input id="codes" value="510300 510500 511010" spellcheck="false">
+      </div>
+      <div><label>目标年化收益率</label><input id="target" value="8%"></div>
+      <div><label>无风险利率</label><input id="rf" value="2%"></div>
+      <div><label>回看年数</label><input id="years" type="number" value="10" min="1" max="20"></div>
+      <div><label>净值字段</label><select id="field"><option value="LJJZ">累计净值 LJJZ</option><option value="DWJZ">单位净值 DWJZ</option></select></div>
+      <div><label>做空</label><select id="short"><option value="0">只做多</option><option value="1">允许做空</option></select></div>
+    </div>
+    <div class="hint">数据来自天天基金公开净值文件。首次运行需下载约 25MB 的 Python 运行时，之后浏览器会缓存。</div>
+    <div style="margin-top:16px"><button id="run" disabled>正在加载计算内核…</button></div>
+  </div>
+
+  <div class="card"><div id="log">准备中…</div></div>
+  <div id="errBox" class="hide"></div>
+
+  <div id="out" class="hide">
+    <div class="card">
+      <h2>组合指标</h2>
+      <div id="warns"></div>
+      <div class="m" id="metrics"></div>
+      <div class="hint" id="span"></div>
+    </div>
+    <div class="card"><h2>最优权重</h2><div class="scroll"><table id="wt"></table></div></div>
+    <div class="card"><h2>组合净值曲线</h2><div id="svg1"></div></div>
+    <div class="card"><h2>有效前沿</h2><div id="svg2"></div></div>
+    <div class="card"><h2>逐年指标</h2><div class="scroll"><table id="am"></table></div></div>
+    <div class="card"><h2>相关系数矩阵</h2><div class="scroll"><table id="corr"></table></div></div>
+    <div class="card"><h2>完整报告</h2><a id="dl" class="dl" download="portfolio_report.html">下载 HTML 报告</a></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.28.3/full/pyodide.js"></script>
+<script>
+const logEl=document.getElementById('log'), runBtn=document.getElementById('run');
+let lines=[];
+function log(m){lines.push(m);logEl.textContent=lines.join('\n');logEl.scrollTop=logEl.scrollHeight;}
+function setLog(m){lines=[m];logEl.textContent=m;}
+
+// 天天基金的净值接口有 Referer 校验，浏览器禁止脚本设置 Referer，因此改用同站的
+// 静态净值文件 pingzhongdata/<code>.js；该文件没有 Referer 校验，但也不发 CORS 头，
+// 所以必须经过一个公共 CORS 代理。代理不可用时依次回退。
+const PROXIES=[u=>'https://proxy.cors.sh/'+u, u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u)];
+
+async function fetchFund(code, field){
+  const src=`https://fund.eastmoney.com/pingzhongdata/${code}.js`;
+  let lastErr='';
+  for(const p of PROXIES){
+    try{
+      const r=await fetch(p(src),{signal:AbortSignal.timeout(45000)});
+      if(!r.ok){lastErr='HTTP '+r.status;continue;}
+      const t=await r.text();
+      const nameM=t.match(/var\s+fS_name\s*=\s*"([^"]*)"/);
+      let points=null, note='';
+      if(field==='LJJZ'){
+        const m=t.match(/Data_ACWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
+        if(m){points=JSON.parse(m[1]);note='累计净值';}
+      }else{
+        const m=t.match(/Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
+        if(m){points=JSON.parse(m[1]).map(o=>[o.x,o.y]);note='单位净值';}
+      }
+      if(!points||!points.length){lastErr='净值序列为空';continue;}
+      return {code, name:nameM?nameM[1]:'', points, field_note:note};
+    }catch(e){ lastErr=String(e).slice(0,80); }
+  }
+  throw new Error(`${code} 数据获取失败：${lastErr}`);
+}
+
+let pyodide, py;
+(async()=>{
+  try{
+    setLog('正在加载 Python 运行时…');
+    pyodide=await loadPyodide({indexURL:'https://cdn.jsdelivr.net/pyodide/v0.28.3/full/'});
+    log('正在加载 numpy / pandas…');
+    await pyodide.loadPackage(['numpy','pandas']);
+    log('正在载入优化器内核…');
+    for(const f of ['markowitz_etf_optimizer_v2.py','app.py']){
+      const r=await fetch(f+'?v='+Date.now());
+      if(!r.ok) throw new Error(`无法加载 ${f}：HTTP ${r.status}`);
+      pyodide.FS.writeFile('/'+f, await r.text());
+    }
+    pyodide.runPython(`import sys; sys.path.insert(0,'/')`);
+    py=pyodide.pyimport('app');
+    log('内核就绪。');
+    runBtn.disabled=false; runBtn.textContent='开始优化';
+  }catch(e){ setLog('加载失败：'+e); }
+})();
+
+function tbl(el,head,rows){
+  el.innerHTML='<thead><tr>'+head.map(h=>`<th>${h}</th>`).join('')+'</tr></thead><tbody>'+
+    rows.map(r=>'<tr>'+r.map(c=>`<td>${c}</td>`).join('')+'</tr>').join('')+'</tbody>';
+}
+const pct=x=>(x*100).toFixed(2)+'%';
+
+runBtn.onclick=async()=>{
+  const errBox=document.getElementById('errBox'), out=document.getElementById('out');
+  errBox.className='hide'; out.className='hide'; runBtn.disabled=true;
+  try{
+    const field=document.getElementById('field').value;
+    setLog('校验输入…');
+    const v=py.validate_inputs(document.getElementById('codes').value,
+      document.getElementById('target').value, document.getElementById('rf').value,
+      document.getElementById('years').value);
+    const codes=v.get(0).toJs(), start=v.get(4), end=v.get(5);
+    log(`区间 ${start} → ${end}，共 ${codes.length} 只标的。`);
+
+    const payload=[];
+    for(const c of codes){ log(`下载 ${c} 净值…`); payload.push(await fetchFund(c, field)); }
+    log('对齐交易日…');
+    const f=py.build_frame(JSON.stringify(payload), start, end);
+    log('估计年化收益与协方差、求解组合、回测、生成前沿…');
+    await new Promise(r=>setTimeout(r,30));
+    const res=JSON.parse(py.run(f.get(0), f.get(1), f.get(2), v.get(1), v.get(2),
+      document.getElementById('short').value==='1'));
+
+    document.getElementById('warns').innerHTML=(res.warnings||[]).map(w=>`<div class="warn">${w}</div>`).join('');
+    document.getElementById('metrics').innerHTML=[
+      ['目标年化收益',pct(res.target_return)],['组合年化收益',pct(res.annual_return)],
+      ['年化波动率',pct(res.annual_std)],['夏普比率',res.sharpe.toFixed(3)],
+      ['最大回撤',pct(res.max_drawdown)]
+    ].map(([k,val])=>`<div class="mc"><div class="k">${k}</div><div class="v">${val}</div></div>`).join('');
+    document.getElementById('span').textContent=
+      `样本区间 ${res.start} → ${res.end}，共 ${res.rows} 个交易日；最大回撤自 ${res.peak_date} 至 ${res.trough_date}。`;
+    tbl(document.getElementById('wt'),['标的','权重'],res.weights.map(([k,val])=>[k,pct(val)]));
+    document.getElementById('svg1').innerHTML=res.portfolio_svg;
+    document.getElementById('svg2').innerHTML=res.frontier_svg||'<div class="hint">本次未生成有效前沿。</div>';
+    const am=res.annual_metrics||[];
+    if(am.length) tbl(document.getElementById('am'),Object.keys(am[0]),
+      am.map(r=>Object.values(r).map(x=>typeof x==='number'?x.toFixed(4):x)));
+    tbl(document.getElementById('corr'),['']. concat(res.correlation.labels),
+      res.correlation.matrix.map((row,i)=>[res.correlation.labels[i]].concat(row)));
+    document.getElementById('dl').href=URL.createObjectURL(new Blob([res.report_html],{type:'text/html'}));
+    out.className=''; log('完成。');
+  }catch(e){
+    const msg=(e&&e.message)?e.message:String(e);
+    errBox.className='card err'; errBox.textContent='出错：'+msg.split('\n').slice(-6).join('\n');
+    log('失败。');
+  }finally{ runBtn.disabled=false; }
+};
+</script>
+</body>
+</html>
